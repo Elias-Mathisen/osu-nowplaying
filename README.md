@@ -28,3 +28,14 @@ printed JSON with the field names in the `map()` function in helper.js.
 Notes: osu! proxies bio images and may cache them, so expect some delay. Free hosts can sleep when idle,
 so the first load after a quiet period may be slow. Cards are latin-font only (romanised titles).
 Preview locally with `node test.js` (writes samples/*.png).
+
+## Full bio layout
+Extra environment variables on the server:
+- TAGLINE  (optional, shown under your name; default "osu!mania 4K player from Norway")
+- LASTFM_USER, LASTFM_KEY  (for the tiny music strip; free key at https://www.last.fm/api/account/create)
+
+Routes: /header.png (welcome banner), /card.png (now playing), /music.png (music strip).
+
+    [centre][img]https://YOUR-APP/header.png[/img]
+    [img]https://YOUR-APP/card.png[/img]
+    [img]https://YOUR-APP/music.png[/img][/centre]

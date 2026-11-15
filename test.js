@@ -1,4 +1,4 @@
-import { renderCard, renderHeader } from './card.js';
+import { renderCard, renderHeader, renderMusic } from './card.js';
 import { writeFileSync } from 'node:fs';
 
 const user = { name: 'yourname', pp: 4821, rank: 48210, countryRank: 2133 };
@@ -9,5 +9,7 @@ const cases = {
   offline: { mode: 'offline', user, lastSeen: new Date(Date.now() - 3 * 3600e3).toISOString(), lastPlayed: { title: 'Midnight Static', artist: 'Fictional Artist', version: 'Insane' } },
 };
 for (const [k, v] of Object.entries(cases)) writeFileSync(`samples/${k}.png`, await renderCard(v));
-writeFileSync('samples/header.png', await renderHeader({ user: { ...user, playmode: 'mania' }, tagline: 'Hello! I mostly play 4K.' }));
+writeFileSync('samples/header.png', await renderHeader({ user: { ...user, playmode: 'mania' }, tagline: 'osu!mania 4K player from Norway' }));
+writeFileSync('samples/music-playing.png', await renderMusic({ playing: true, title: 'Midnight Static', artist: 'Fictional Artist' }));
+writeFileSync('samples/music-last.png', await renderMusic({ playing: false, title: 'Midnight Static', artist: 'Fictional Artist', when: '2 h ago' }));
 console.log('ok');

@@ -99,3 +99,17 @@ export async function renderHeader({ user = {}, avatar, tagline }) {
   const svg = await satori(tree, { width: W, height: 140, fonts });
   return new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
 }
+
+// s: { playing, title, artist, when }  (title empty = nothing known)
+export async function renderMusic({ playing, title, artist, when }) {
+  const bar = (hgt) => h('div', { width: 3, height: hgt, borderRadius: 2, background: playing ? C.green : C.gray, marginRight: 2 });
+  const text = !title ? 'No music data yet' : `${playing ? 'Listening to' : 'Last listened'}  ${title} - ${artist}${!playing && when ? '  (' + when + ')' : ''}`;
+  const tree = h(
+    'div',
+    { width: W, height: 34, boxSizing: 'border-box', background: C.bg, borderRadius: 10, padding: '0 14px', fontFamily: 'Inter', color: C.dim, alignItems: 'center' },
+    h('div', { alignItems: 'flex-end', height: 12, marginRight: 10 }, bar(6), bar(12), bar(8)),
+    txt(text, { fontSize: 12, flex: 1, minWidth: 0 })
+  );
+  const svg = await satori(tree, { width: W, height: 34, fonts });
+  return new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
+}

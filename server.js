@@ -1,7 +1,8 @@
 import http from 'node:http';
-import { renderCard, renderHeader } from './card.js';
+import { renderCard, renderHeader, renderMusic, ago } from './card.js';
 
-const { OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_USER, PUSH_TOKEN, PORT = 3000, MOCK, TAGLINE } = process.env;
+const { OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_USER, PUSH_TOKEN, PORT = 3000, MOCK, LASTFM_USER, LASTFM_KEY } = process.env;
+const TAGLINE = process.env.TAGLINE || 'osu!mania 4K player from Norway';
 const LIVE_TTL = 20_000; // helper pushes every few seconds; older than this = game closed
 
 let live = null; // { at, data }
@@ -66,6 +67,19 @@ async function getAvatar(id) {
   });
 }
 
+async function getMusic() {
+  if (MOCK) return { playing: true, title: 'Midnight Static', artist: 'Fictional Artist' };
+  if (!LASTFM_USER || !LASTFM_KEY) return {};
+  return memo('music', 20_000, async () => {
+    const r = await fetch(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user=${encodeURIComponent(LASTFM_USER)}&api_key=${LASTFM_KEY}&format=json&limit=1`);
+    if (!r.ok) throw new Error(`lastfm ${r.status}`);
+    const t = [].concat((await r.json()).recenttracks?.track || [])[0];
+    if (!t) return {};
+    const playing = t['@attr']?.nowplaying === 'true';
+    return { playing, title: t.name, artist: t.artist?.['#text'], when: !playing && t.date?.uts ? ago(new Date(t.date.uts * 1000).toISOString()) : '' };
+  });
+}
+
 async function buildState() {
   const user = (await getUser()) || {};
   const d = live && Date.now() - live.at < LIVE_TTL ? live.data : null;
@@ -92,6 +106,10 @@ http
         const user = (await getUser()) || {};
         const png = await renderHeader({ user, avatar: await getAvatar(user.id), tagline: TAGLINE });
         return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=300' }).end(png);
+      }
+      if (url.pathname === '/music.png') {
+        const png = await renderMusic((await getMusic()) || {});
+        return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=10' }).end(png);
       }
       res.writeHead(200, { 'content-type': 'text/plain' }).end('osu nowplaying: /card.png');
     } catch (e) {
