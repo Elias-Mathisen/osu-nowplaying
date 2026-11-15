@@ -48,7 +48,7 @@ export async function renderCard(s) {
     if (map.stars) chips.push(chip(`${Number(map.stars).toFixed(2)} stars`, C.gold));
     if (map.mods) chips.push(chip(map.mods, C.pink));
     if (map.bpm) chips.push(chip(`${Math.round(map.bpm)} BPM`, C.dim));
-  } else if (s.lastPlayed) chips.push(chip('Last played', C.dim));
+  } else if (s.lastPlayed) chips.push(chip(s.lastPlayed.top ? 'Top play' : 'Last played', C.dim));
 
   const stats =
     mode === 'playing'

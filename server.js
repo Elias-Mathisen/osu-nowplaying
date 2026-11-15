@@ -35,13 +35,16 @@ async function api(path) {
 async function getUser() {
   if (MOCK) return { id: 1, name: OSU_USER || 'yourname', pp: 4821, rank: 48210, countryRank: 2133, lastSeen: new Date(Date.now() - 3 * 3600e3).toISOString(), lastPlayed: { title: 'Midnight Static', artist: 'Fictional Artist', version: 'Insane' } };
   return memo('user', 60_000, async () => {
-    const u = await api(`/users/${encodeURIComponent(OSU_USER)}/osu?key=${/^\d+$/.test(OSU_USER) ? 'id' : 'username'}`);
-    const recent = await api(`/users/${u.id}/scores/recent?limit=1&include_fails=1`).catch(() => []);
+    const u = await api(`/users/${encodeURIComponent(OSU_USER)}?key=${/^\d+$/.test(OSU_USER) ? 'id' : 'username'}`);
+    const mode = u.playmode || 'osu';
+    let recent = await api(`/users/${u.id}/scores/recent?limit=1&include_fails=1&mode=${mode}`).catch(() => []);
+    let top = false;
+    if (!recent.length) { recent = await api(`/users/${u.id}/scores/best?limit=1&mode=${mode}`).catch(() => []); top = true; }
     const r = recent[0];
     return {
       id: u.id, name: u.username, pp: u.statistics?.pp, rank: u.statistics?.global_rank, countryRank: u.statistics?.country_rank,
       lastSeen: u.last_visit,
-      lastPlayed: r ? { title: r.beatmapset?.title, artist: r.beatmapset?.artist, version: r.beatmap?.version } : null,
+      lastPlayed: r ? { title: r.beatmapset?.title, artist: r.beatmapset?.artist, version: r.beatmap?.version, top } : null,
     };
   });
 }
