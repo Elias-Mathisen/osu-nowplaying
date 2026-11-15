@@ -44,7 +44,7 @@ async function getUser() {
     return {
       id: u.id, name: u.username, pp: u.statistics?.pp, rank: u.statistics?.global_rank, countryRank: u.statistics?.country_rank,
       lastSeen: u.last_visit,
-      lastPlayed: r ? { title: r.beatmapset?.title, artist: r.beatmapset?.artist, version: r.beatmap?.version, top } : null,
+      lastPlayed: r ? { title: r.beatmapset?.title, artist: r.beatmapset?.artist, version: r.beatmap?.version, setId: r.beatmapset?.id, top } : null,
     };
   });
 }
@@ -61,7 +61,7 @@ async function getCover(setId) {
 async function buildState() {
   const user = (await getUser()) || {};
   const d = live && Date.now() - live.at < LIVE_TTL ? live.data : null;
-  if (!d) return { mode: 'offline', user, lastSeen: user.lastSeen, lastPlayed: user.lastPlayed, cover: null };
+  if (!d) return { mode: 'offline', user, lastSeen: user.lastSeen, lastPlayed: user.lastPlayed, cover: await getCover(user.lastPlayed?.setId) };
   return { mode: d.playing ? 'playing' : 'menu', user, map: d, live: d, cover: await getCover(d.setId) };
 }
 

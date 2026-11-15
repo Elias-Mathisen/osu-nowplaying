@@ -19,6 +19,7 @@ const chip = (s, color) => h('div', { background: C.panel, color, fontSize: 12, 
 const stat = (label, value) =>
   h('div', { flexDirection: 'column', marginRight: 22 }, txt(value, { fontSize: 17, fontWeight: 700 }), txt(label, { fontSize: 11, color: C.dim }));
 
+const br = (v) => (v.startsWith('[') ? v : `[${v}]`);
 const fmt = (n) => (n == null ? '-' : Math.round(n).toLocaleString('en-US'));
 
 export function ago(iso) {
@@ -40,8 +41,8 @@ export async function renderCard(s) {
   const title = mode === 'offline' ? s.lastPlayed?.title : map.title;
   const sub =
     mode === 'offline'
-      ? s.lastPlayed ? `${s.lastPlayed.artist} - [${s.lastPlayed.version}]` : ''
-      : `${map.artist || ''} - [${map.version || ''}]`;
+      ? s.lastPlayed ? `${s.lastPlayed.artist} - ${br(s.lastPlayed.version)}` : ''
+      : `${map.artist || ''} - ${br(map.version || '')}`;
 
   const chips = [];
   if (mode !== 'offline') {
