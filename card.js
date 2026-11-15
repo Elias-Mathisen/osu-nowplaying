@@ -77,3 +77,25 @@ export async function renderCard(s) {
   const svg = await satori(tree, { width: W, height: H, fonts });
   return new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
 }
+
+const MODES = { osu: 'osu!', taiko: 'osu!taiko', fruits: 'osu!catch', mania: 'osu!mania' };
+
+// s: { user, avatar, tagline }
+export async function renderHeader({ user = {}, avatar, tagline }) {
+  const pic = avatar
+    ? { type: 'img', props: { src: avatar, width: 96, height: 96, style: { borderRadius: 48 } } }
+    : h('div', { width: 96, height: 96, borderRadius: 48, background: C.panel });
+  const chips = [MODES[user.playmode] && chip(MODES[user.playmode], C.pink), user.rank != null && chip(`#${fmt(user.rank)} global`, C.text), user.countryRank != null && chip(`#${fmt(user.countryRank)} country`, C.dim), user.pp != null && chip(`${fmt(user.pp)}pp`, C.gold)];
+  const tree = h(
+    'div',
+    { width: W, height: 140, boxSizing: 'border-box', background: C.bg, borderRadius: 14, padding: 22, fontFamily: 'Inter', color: C.text, alignItems: 'center' },
+    pic,
+    h('div', { flexDirection: 'column', marginLeft: 20, flex: 1, minWidth: 0 },
+      txt('Welcome to my profile', { fontSize: 12, fontWeight: 700, color: C.pink }),
+      txt(user.name || 'player', { fontSize: 30, fontWeight: 700, marginTop: 2 }),
+      txt(tagline || '', { fontSize: 13, color: C.dim, marginTop: 2 }),
+      h('div', { marginTop: 10 }, ...chips))
+  );
+  const svg = await satori(tree, { width: W, height: 140, fonts });
+  return new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
+}

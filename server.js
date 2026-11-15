@@ -1,7 +1,7 @@
 import http from 'node:http';
-import { renderCard } from './card.js';
+import { renderCard, renderHeader } from './card.js';
 
-const { OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_USER, PUSH_TOKEN, PORT = 3000, MOCK } = process.env;
+const { OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_USER, PUSH_TOKEN, PORT = 3000, MOCK, TAGLINE } = process.env;
 const LIVE_TTL = 20_000; // helper pushes every few seconds; older than this = game closed
 
 let live = null; // { at, data }
@@ -33,7 +33,7 @@ async function api(path) {
 }
 
 async function getUser() {
-  if (MOCK) return { id: 1, name: OSU_USER || 'yourname', pp: 4821, rank: 48210, countryRank: 2133, lastSeen: new Date(Date.now() - 3 * 3600e3).toISOString(), lastPlayed: { title: 'Midnight Static', artist: 'Fictional Artist', version: 'Insane' } };
+  if (MOCK) return { id: 1, playmode: 'mania', name: OSU_USER || 'yourname', pp: 4821, rank: 48210, countryRank: 2133, lastSeen: new Date(Date.now() - 3 * 3600e3).toISOString(), lastPlayed: { title: 'Midnight Static', artist: 'Fictional Artist', version: 'Insane' } };
   return memo('user', 60_000, async () => {
     const u = await api(`/users/${encodeURIComponent(OSU_USER)}?key=${/^\d+$/.test(OSU_USER) ? 'id' : 'username'}`);
     const mode = u.playmode || 'osu';
@@ -42,7 +42,7 @@ async function getUser() {
     if (!recent.length) { recent = await api(`/users/${u.id}/scores/best?limit=1&mode=${mode}`).catch(() => []); top = true; }
     const r = recent[0];
     return {
-      id: u.id, name: u.username, pp: u.statistics?.pp, rank: u.statistics?.global_rank, countryRank: u.statistics?.country_rank,
+      id: u.id, playmode: mode, name: u.username, pp: u.statistics?.pp, rank: u.statistics?.global_rank, countryRank: u.statistics?.country_rank,
       lastSeen: u.last_visit,
       lastPlayed: r ? { title: r.beatmapset?.title, artist: r.beatmapset?.artist, version: r.beatmap?.version, setId: r.beatmapset?.id, top } : null,
     };
@@ -55,6 +55,14 @@ async function getCover(setId) {
     const r = await fetch(`https://assets.ppy.sh/beatmaps/${setId}/covers/list@2x.jpg`);
     if (!r.ok) throw new Error(`cover ${r.status}`);
     return `data:image/jpeg;base64,${Buffer.from(await r.arrayBuffer()).toString('base64')}`;
+  });
+}
+
+async function getAvatar(id) {
+  return memo(`avatar${id}`, 6 * 3600e3, async () => {
+    const r = await fetch(`https://a.ppy.sh/${id}`);
+    if (!r.ok) throw new Error(`avatar ${r.status}`);
+    return `data:${r.headers.get('content-type') || 'image/png'};base64,${Buffer.from(await r.arrayBuffer()).toString('base64')}`;
   });
 }
 
@@ -79,6 +87,11 @@ http
       if (url.pathname === '/card.png') {
         const png = await renderCard(await buildState());
         return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=10' }).end(png);
+      }
+      if (url.pathname === '/header.png') {
+        const user = (await getUser()) || {};
+        const png = await renderHeader({ user, avatar: await getAvatar(user.id), tagline: TAGLINE });
+        return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=300' }).end(png);
       }
       res.writeHead(200, { 'content-type': 'text/plain' }).end('osu nowplaying: /card.png');
     } catch (e) {
