@@ -100,16 +100,29 @@ export async function renderHeader({ user = {}, avatar, tagline }) {
   return new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
 }
 
-// s: { playing, title, artist, when }  (title empty = nothing known)
-export async function renderMusic({ playing, title, artist, when }) {
+const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+
+// { playing, title, artist, when, cover, progress, duration }  (ms values; title empty = nothing known)
+export async function renderMusic({ playing, title, artist, when, cover, progress, duration }) {
   const bar = (hgt) => h('div', { width: 3, height: hgt, borderRadius: 2, background: playing ? C.green : C.gray, marginRight: 2 });
-  const text = !title ? 'No music data yet' : `${playing ? 'Listening to' : 'Last listened'}  ${title} - ${artist}${!playing && when ? '  (' + when + ')' : ''}`;
+  const art = cover
+    ? { type: 'img', props: { src: cover, width: 44, height: 44, style: { borderRadius: 6 } } }
+    : h('div', { width: 44, height: 44, borderRadius: 6, background: C.panel, alignItems: 'center', justifyContent: 'center' }, h('div', { alignItems: 'flex-end', height: 14 }, bar(7), bar(14), bar(9)));
+  const head = !title ? 'No music data yet' : `${playing ? 'Listening to' : 'Last listened'}  ${title} - ${artist}${!playing && when ? '  (' + when + ')' : ''}`;
+  const pct = duration ? Math.max(0, Math.min(100, (progress / duration) * 100)) : 0;
+  const line =
+    playing && duration
+      ? h('div', { alignItems: 'center', marginTop: 6 },
+          txt(mmss(progress), { fontSize: 11, color: C.dim, width: 34 }),
+          h('div', { flex: 1, height: 4, background: C.panel, borderRadius: 2 }, h('div', { width: `${pct}%`, height: 4, background: C.green, borderRadius: 2 })),
+          txt(mmss(duration), { fontSize: 11, color: C.dim, width: 34, justifyContent: 'flex-end' }))
+      : null;
   const tree = h(
     'div',
-    { width: W, height: 34, boxSizing: 'border-box', background: C.bg, borderRadius: 10, padding: '0 14px', fontFamily: 'Inter', color: C.dim, alignItems: 'center' },
-    h('div', { alignItems: 'flex-end', height: 12, marginRight: 10 }, bar(6), bar(12), bar(8)),
-    txt(text, { fontSize: 12, flex: 1, minWidth: 0 })
+    { width: W, height: 60, boxSizing: 'border-box', background: C.bg, borderRadius: 10, padding: '8px 14px', fontFamily: 'Inter', color: C.dim, alignItems: 'center' },
+    art,
+    h('div', { flexDirection: 'column', flex: 1, minWidth: 0, marginLeft: 12, justifyContent: 'center' }, txt(head, { fontSize: 12, color: C.text }), line)
   );
-  const svg = await satori(tree, { width: W, height: 34, fonts });
+  const svg = await satori(tree, { width: W, height: 60, fonts });
   return new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
 }

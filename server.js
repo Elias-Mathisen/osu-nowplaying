@@ -89,11 +89,13 @@ async function getSpotify() {
       if (!r.ok) throw new Error(`spotify ${r.status}`);
       const j = await r.json();
       if (j.is_playing && j.item?.name) {
-        sp.last = { title: j.item.name, artist: (j.item.artists || []).map((a) => a.name).join(', '), at: Date.now() };
-        return { playing: true, title: sp.last.title, artist: sp.last.artist };
+        const imgs = j.item.album?.images || [];
+        const img = (imgs.find((i) => i.width && i.width <= 100) || imgs[imgs.length - 1])?.url;
+        sp.last = { title: j.item.name, artist: (j.item.artists || []).map((a) => a.name).join(', '), at: Date.now(), img };
+        return { playing: true, title: sp.last.title, artist: sp.last.artist, img, progress: j.progress_ms, duration: j.item.duration_ms, fetchedAt: Date.now() };
       }
     }
-    return sp.last ? { playing: false, title: sp.last.title, artist: sp.last.artist, when: ago(new Date(sp.last.at).toISOString()) } : {};
+    return sp.last ? { playing: false, title: sp.last.title, artist: sp.last.artist, img: sp.last.img, when: ago(new Date(sp.last.at).toISOString()) } : {};
   });
 }
 
@@ -114,6 +116,14 @@ async function getMusic() {
     if (!t) return {};
     const playing = t['@attr']?.nowplaying === 'true';
     return { playing, title: t.name, artist: t.artist?.['#text'], when: !playing && t.date?.uts ? ago(new Date(t.date.uts * 1000).toISOString()) : '' };
+  });
+}
+
+async function getImage(url) {
+  return memo(`img${url}`, 6 * 3600e3, async () => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`img ${r.status}`);
+    return `data:${r.headers.get('content-type') || 'image/jpeg'};base64,${Buffer.from(await r.arrayBuffer()).toString('base64')}`;
   });
 }
 
@@ -175,7 +185,10 @@ http
         return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=300' }).end(png);
       }
       if (url.pathname === '/music.png') {
-        const png = await renderMusic((await getMusic()) || {});
+        const m = (await getMusic()) || {};
+        const cover = m.img ? await getImage(m.img) : null;
+        const progress = m.playing && m.duration ? Math.min(m.duration, m.progress + (Date.now() - m.fetchedAt)) : 0;
+        const png = await renderMusic({ ...m, cover, progress });
         return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=10' }).end(png);
       }
       res.writeHead(200, { 'content-type': 'text/plain' }).end('osu nowplaying: /card.png');
