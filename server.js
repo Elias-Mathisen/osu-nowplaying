@@ -70,6 +70,57 @@ async function getAvatar(url) {
   });
 }
 
+const sp = { v: null, exp: 0, last: null, refresh: null };
+const states = new Map();
+const spRedirect = (req) => `https://${req.headers.host}/spotify/callback`;
+async function getSpotify() {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET || !(sp.refresh || SPOTIFY_REFRESH_TOKEN)) return null;
+  return memo('spotify', 12_000, async () => {
+    if (Date.now() > sp.exp) {
+      const r = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: { authorization: 'Basic ' + Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'), 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: sp.refresh || SPOTIFY_REFRESH_TOKEN }),
+      });
+      if (!r.ok) throw new Error(`spotify token ${r.status}`);
+      const j = await r.json();
+      sp.v = j.access_token; sp.exp = Date.now() + (j.expires_in - 60) * 1000;
+    }
+    const r = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers: { authorization: `Bearer ${sp.v}` } });
+    if (r.status !== 204) {
+      if (!r.ok) throw new Error(`spotify ${r.status}`);
+      const j = await r.json();
+      if (j.is_playing && j.item?.name) {
+        const imgs = j.item.album?.images || [];
+        const img = (imgs.find((i) => i.width && i.width <= 100) || imgs[imgs.length - 1])?.url;
+        sp.last = { title: j.item.name, artist: (j.item.artists || []).map((a) => a.name).join(', '), at: Date.now(), img };
+        return { playing: true, title: sp.last.title, artist: sp.last.artist, img, progress: j.progress_ms, duration: j.item.duration_ms, fetchedAt: Date.now() };
+      }
+    }
+    return sp.last ? { playing: false, title: sp.last.title, artist: sp.last.artist, img: sp.last.img, when: ago(new Date(sp.last.at).toISOString()) } : {};
+  });
+}
+
+async function getMusic() {
+  if (music) {
+    const fresh = Date.now() - music.at < 25_000;
+    if (fresh) return music.data;
+    if (!LASTFM_USER) return { ...music.data, playing: false, when: ago(new Date(music.at).toISOString()) };
+  }
+  const spot = await getSpotify();
+  if (spot) return spot;
+  if (MOCK) return { playing: true, title: 'Midnight Static', artist: 'Fictional Artist' };
+  if (!LASTFM_USER || !LASTFM_KEY) return {};
+  return memo('music', 20_000, async () => {
+    const r = await fetch(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user=${encodeURIComponent(LASTFM_USER)}&api_key=${LASTFM_KEY}&format=json&limit=1`);
+    if (!r.ok) throw new Error(`lastfm ${r.status}`);
+    const t = [].concat((await r.json()).recenttracks?.track || [])[0];
+    if (!t) return {};
+    const playing = t['@attr']?.nowplaying === 'true';
+    return { playing, title: t.name, artist: t.artist?.['#text'], when: !playing && t.date?.uts ? ago(new Date(t.date.uts * 1000).toISOString()) : '' };
+  });
+}
+
 async function getImage(url) {
   return memo(`img${url}`, 6 * 3600e3, async () => {
     const r = await fetch(url);
@@ -175,3 +226,5 @@ http
 const warm = () => { for (const [name, { ttl }] of Object.entries(IMAGES)) { const e = pngs.get(name); if (!e || Date.now() - e.at > ttl) refreshPng(name).catch((err) => console.error(name, err.message)); } };
 warm();
 setInterval(warm, 5_000);
+
+process.on('unhandledRejection', (e) => console.error('unhandled', e?.message || e));
