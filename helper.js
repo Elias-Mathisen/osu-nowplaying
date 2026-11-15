@@ -1,6 +1,7 @@
 // Runs on your gaming PC next to tosu. Reads the game state and pushes it to your card server.
 // Usage: SERVER_URL=https://your-app.example PUSH_TOKEN=secret node helper.js [--dump]
 import WebSocket from 'ws';
+import { execFile } from 'node:child_process';
 
 const { SERVER_URL, PUSH_TOKEN, TOSU_WS = 'ws://127.0.0.1:24050/ws' } = process.env;
 const dump = process.argv.includes('--dump');
@@ -36,3 +37,43 @@ function connect() {
 }
 connect();
 console.log(`reading ${TOSU_WS}${dump ? ' (dump mode)' : ''}`);
+
+// ---- Spotify desktop app -> /music (no Spotify API, no Premium needed) ----
+export function parseTitle(t) {
+  t = (t || '').trim();
+  if (!t) return null; // app not running / no window
+  if (/^Spotify( (Free|Premium))?$/.test(t)) return { playing: false }; // paused or idle
+  if (t === 'Advertisement' || t === 'Spotify') return { playing: false, ad: true };
+  const i = t.indexOf(' - ');
+  return i < 0 ? { playing: false } : { playing: true, artist: t.slice(0, i), title: t.slice(i + 3) };
+}
+
+function readSpotifyTitle() {
+  return new Promise((res) => {
+    const done = (e, out) => res(e ? '' : String(out).trim());
+    if (process.platform === 'win32')
+      execFile('powershell', ['-NoProfile', '-Command', '(Get-Process Spotify -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | Select-Object -First 1 -ExpandProperty MainWindowTitle)'], { timeout: 5000 }, done);
+    else if (process.platform === 'darwin')
+      execFile('osascript', ['-e', 'if application "Spotify" is running then tell application "Spotify" to if player state is playing then return (artist of current track) & " - " & (name of current track)\nreturn "Spotify"'], { timeout: 5000 }, done);
+    else res('');
+  });
+}
+
+let lastTrack = null, lastSent = 0, lastKey = '';
+async function spotifyTick() {
+  const p = parseTitle(await readSpotifyTitle());
+  if (!p) return; // Spotify closed: stop pushing, server shows "last listened"
+  if (p.playing) lastTrack = { artist: p.artist, title: p.title };
+  if (!lastTrack) return;
+  const body = { playing: !!p.playing, ...lastTrack };
+  const key = JSON.stringify(body);
+  if (dump) { console.log('SPOTIFY', body); return; }
+  if (key === lastKey && Date.now() - lastSent < 10_000) return;
+  lastKey = key; lastSent = Date.now();
+  try {
+    const r = await fetch(`${SERVER_URL}/music`, { method: 'POST', headers: { 'x-token': PUSH_TOKEN, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) console.error('music push failed', r.status);
+  } catch (e) { console.error('music push error', e.message); }
+}
+setInterval(spotifyTick, 5000);
+spotifyTick();

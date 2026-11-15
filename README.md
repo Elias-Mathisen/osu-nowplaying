@@ -39,3 +39,8 @@ Routes: /header.png (welcome banner), /card.png (now playing), /music.png (music
     [centre][img]https://YOUR-APP/header.png[/img]
     [img]https://YOUR-APP/card.png[/img]
     [img]https://YOUR-APP/music.png[/img][/centre]
+
+## Spotify without the Spotify API
+helper.js also reads the desktop Spotify app's window title (Windows) or asks the app via AppleScript (macOS)
+every 5 seconds and pushes it to POST /music. No Spotify developer account or Premium needed. Keep the Spotify
+window open or minimized (not closed to the tray). Last.fm is only a fallback and is optional.

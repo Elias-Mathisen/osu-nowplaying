@@ -5,6 +5,7 @@ const { OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_USER, PUSH_TOKEN, PORT = 3000, MOC
 const TAGLINE = process.env.TAGLINE || 'osu!mania 4K player from Norway';
 const LIVE_TTL = 20_000; // helper pushes every few seconds; older than this = game closed
 
+let music = null; // pushed by helper: { at, data }
 let live = null; // { at, data }
 const cache = new Map(); // key -> { at, value }
 const memo = async (key, ttl, fn) => {
@@ -68,6 +69,11 @@ async function getAvatar(id) {
 }
 
 async function getMusic() {
+  if (music) {
+    const fresh = Date.now() - music.at < 25_000;
+    if (fresh) return music.data;
+    if (!LASTFM_USER) return { ...music.data, playing: false, when: ago(new Date(music.at).toISOString()) };
+  }
   if (MOCK) return { playing: true, title: 'Midnight Static', artist: 'Fictional Artist' };
   if (!LASTFM_USER || !LASTFM_KEY) return {};
   return memo('music', 20_000, async () => {
@@ -96,6 +102,14 @@ http
         let body = '';
         for await (const c of req) { body += c; if (body.length > 20_000) return res.writeHead(413).end(); }
         live = { at: Date.now(), data: JSON.parse(body) };
+        return res.writeHead(204).end();
+      }
+      if (req.method === 'POST' && url.pathname === '/music') {
+        if (!PUSH_TOKEN || req.headers['x-token'] !== PUSH_TOKEN) return res.writeHead(401).end();
+        let body = '';
+        for await (const c of req) { body += c; if (body.length > 5_000) return res.writeHead(413).end(); }
+        const d = JSON.parse(body);
+        music = { at: Date.now(), data: { playing: !!d.playing, title: String(d.title || '').slice(0, 120), artist: String(d.artist || '').slice(0, 120) } };
         return res.writeHead(204).end();
       }
       if (url.pathname === '/card.png') {
