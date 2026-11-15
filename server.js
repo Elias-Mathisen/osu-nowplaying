@@ -11,9 +11,9 @@ const cache = new Map(); // key -> { at, value }
 const memo = async (key, ttl, fn) => {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttl) return hit.value;
-  let value;
-  try { value = await fn(); } catch (e) { console.error(key, e.message); value = hit?.value ?? null; }
-  cache.set(key, { at: Date.now(), value });
+  let value, failed = false;
+  try { value = await fn(); } catch (e) { failed = true; console.error(key, e.message); value = hit?.value ?? null; }
+  cache.set(key, { at: Date.now() - (failed ? ttl - 30_000 : 0), value });
   return value;
 };
 
@@ -44,7 +44,7 @@ async function getUser() {
     if (!recent.length) { recent = await api(`/users/${u.id}/scores/best?limit=1&mode=${mode}`).catch(() => []); top = true; }
     const r = recent[0];
     return {
-      id: u.id, playmode: mode, name: u.username, pp: u.statistics?.pp, rank: u.statistics?.global_rank, countryRank: u.statistics?.country_rank,
+      id: u.id, avatar: u.avatar_url, playmode: mode, name: u.username, pp: u.statistics?.pp, rank: u.statistics?.global_rank, countryRank: u.statistics?.country_rank,
       lastSeen: u.last_visit,
       lastPlayed: r ? { title: r.beatmapset?.title, artist: r.beatmapset?.artist, version: r.beatmap?.version, setId: r.beatmapset?.id, top } : null,
     };
@@ -60,62 +60,13 @@ async function getCover(setId) {
   });
 }
 
-async function getAvatar(id) {
-  return memo(`avatar${id}`, 6 * 3600e3, async () => {
-    const r = await fetch(`https://a.ppy.sh/${id}`);
+async function getAvatar(url) {
+  if (!url) return null;
+  return memo(`avatar${url}`, 6 * 3600e3, async () => {
+    const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (compatible; osu-nowplaying)' } });
     if (!r.ok) throw new Error(`avatar ${r.status}`);
-    return `data:${r.headers.get('content-type') || 'image/png'};base64,${Buffer.from(await r.arrayBuffer()).toString('base64')}`;
-  });
-}
-
-const sp = { v: null, exp: 0, last: null, refresh: null };
-const states = new Map();
-const spRedirect = (req) => `https://${req.headers.host}/spotify/callback`;
-async function getSpotify() {
-  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET || !(sp.refresh || SPOTIFY_REFRESH_TOKEN)) return null;
-  return memo('spotify', 12_000, async () => {
-    if (Date.now() > sp.exp) {
-      const r = await fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: { authorization: 'Basic ' + Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'), 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: sp.refresh || SPOTIFY_REFRESH_TOKEN }),
-      });
-      if (!r.ok) throw new Error(`spotify token ${r.status}`);
-      const j = await r.json();
-      sp.v = j.access_token; sp.exp = Date.now() + (j.expires_in - 60) * 1000;
-    }
-    const r = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers: { authorization: `Bearer ${sp.v}` } });
-    if (r.status !== 204) {
-      if (!r.ok) throw new Error(`spotify ${r.status}`);
-      const j = await r.json();
-      if (j.is_playing && j.item?.name) {
-        const imgs = j.item.album?.images || [];
-        const img = (imgs.find((i) => i.width && i.width <= 100) || imgs[imgs.length - 1])?.url;
-        sp.last = { title: j.item.name, artist: (j.item.artists || []).map((a) => a.name).join(', '), at: Date.now(), img };
-        return { playing: true, title: sp.last.title, artist: sp.last.artist, img, progress: j.progress_ms, duration: j.item.duration_ms, fetchedAt: Date.now() };
-      }
-    }
-    return sp.last ? { playing: false, title: sp.last.title, artist: sp.last.artist, img: sp.last.img, when: ago(new Date(sp.last.at).toISOString()) } : {};
-  });
-}
-
-async function getMusic() {
-  if (music) {
-    const fresh = Date.now() - music.at < 25_000;
-    if (fresh) return music.data;
-    if (!LASTFM_USER) return { ...music.data, playing: false, when: ago(new Date(music.at).toISOString()) };
-  }
-  const spot = await getSpotify();
-  if (spot) return spot;
-  if (MOCK) return { playing: true, title: 'Midnight Static', artist: 'Fictional Artist' };
-  if (!LASTFM_USER || !LASTFM_KEY) return {};
-  return memo('music', 20_000, async () => {
-    const r = await fetch(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user=${encodeURIComponent(LASTFM_USER)}&api_key=${LASTFM_KEY}&format=json&limit=1`);
-    if (!r.ok) throw new Error(`lastfm ${r.status}`);
-    const t = [].concat((await r.json()).recenttracks?.track || [])[0];
-    if (!t) return {};
-    const playing = t['@attr']?.nowplaying === 'true';
-    return { playing, title: t.name, artist: t.artist?.['#text'], when: !playing && t.date?.uts ? ago(new Date(t.date.uts * 1000).toISOString()) : '' };
+    const type = (r.headers.get('content-type') || 'image/png').split(';')[0];
+    return `data:${type};base64,${Buffer.from(await r.arrayBuffer()).toString('base64')}`;
   });
 }
 
@@ -181,7 +132,7 @@ http
       }
       if (url.pathname === '/header.png') {
         const user = (await getUser()) || {};
-        const png = await renderHeader({ user, avatar: await getAvatar(user.id), tagline: TAGLINE });
+        const png = await renderHeader({ user, avatar: await getAvatar(user.avatar || (user.id ? `https://a.ppy.sh/${user.id}` : null)), tagline: TAGLINE });
         return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=300' }).end(png);
       }
       if (url.pathname === '/music.png') {
