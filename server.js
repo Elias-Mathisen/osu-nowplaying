@@ -68,15 +68,17 @@ async function getAvatar(id) {
   });
 }
 
-const sp = { v: null, exp: 0, last: null };
+const sp = { v: null, exp: 0, last: null, refresh: null };
+const states = new Map();
+const spRedirect = (req) => `https://${req.headers.host}/spotify/callback`;
 async function getSpotify() {
-  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET || !SPOTIFY_REFRESH_TOKEN) return null;
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET || !(sp.refresh || SPOTIFY_REFRESH_TOKEN)) return null;
   return memo('spotify', 12_000, async () => {
     if (Date.now() > sp.exp) {
       const r = await fetch('https://accounts.spotify.com/api/token', {
         method: 'POST',
         headers: { authorization: 'Basic ' + Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'), 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: SPOTIFY_REFRESH_TOKEN }),
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: sp.refresh || SPOTIFY_REFRESH_TOKEN }),
       });
       if (!r.ok) throw new Error(`spotify token ${r.status}`);
       const j = await r.json();
@@ -140,6 +142,28 @@ http
         const d = JSON.parse(body);
         music = { at: Date.now(), data: { playing: !!d.playing, title: String(d.title || '').slice(0, 120), artist: String(d.artist || '').slice(0, 120) } };
         return res.writeHead(204).end();
+      }
+      if (url.pathname === '/spotify/login') {
+        if (!PUSH_TOKEN || url.searchParams.get('key') !== PUSH_TOKEN || !SPOTIFY_CLIENT_ID) return res.writeHead(401).end('unauthorized');
+        const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        states.set(state, Date.now());
+        const q = new URLSearchParams({ client_id: SPOTIFY_CLIENT_ID, response_type: 'code', redirect_uri: spRedirect(req), scope: 'user-read-currently-playing', state });
+        return res.writeHead(302, { location: `https://accounts.spotify.com/authorize?${q}` }).end();
+      }
+      if (url.pathname === '/spotify/callback') {
+        const st = url.searchParams.get('state'), code = url.searchParams.get('code');
+        const ok = st && states.has(st) && Date.now() - states.get(st) < 600_000;
+        states.delete(st);
+        if (!ok || !code) return res.writeHead(400, { 'content-type': 'text/plain' }).end('Login failed or expired: ' + (url.searchParams.get('error') || 'start again from /spotify/login'));
+        const r = await fetch('https://accounts.spotify.com/api/token', {
+          method: 'POST',
+          headers: { authorization: 'Basic ' + Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'), 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: spRedirect(req) }),
+        });
+        const j = await r.json();
+        if (!j.refresh_token) return res.writeHead(400, { 'content-type': 'text/plain' }).end('Spotify said: ' + JSON.stringify(j));
+        sp.refresh = j.refresh_token; sp.exp = 0; cache.delete('spotify');
+        return res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' }).end(`<body style="font-family:sans-serif;max-width:640px;margin:40px auto"><h2>Spotify connected</h2><p>Your music strip works now. To keep it after Render restarts, add this in Render under Environment as <b>SPOTIFY_REFRESH_TOKEN</b> (keep it private):</p><textarea readonly rows="4" style="width:100%" onclick="this.select()">${j.refresh_token}</textarea></body>`);
       }
       if (url.pathname === '/card.png') {
         const png = await renderCard(await buildState());
