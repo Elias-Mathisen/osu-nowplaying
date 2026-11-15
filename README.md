@@ -44,3 +44,7 @@ Routes: /header.png (welcome banner), /card.png (now playing), /music.png (music
 helper.js also reads the desktop Spotify app's window title (Windows) or asks the app via AppleScript (macOS)
 every 5 seconds and pushes it to POST /music. No Spotify developer account or Premium needed. Keep the Spotify
 window open or minimized (not closed to the tray). Last.fm is only a fallback and is optional.
+
+## Spotify via the official API (optional)
+Spotify dashboard app with redirect URI http://127.0.0.1:8888/callback. Run `node spotify-auth.js` once (see file header)
+to get SPOTIFY_REFRESH_TOKEN. Server env: SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN.

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { renderCard, renderHeader, renderMusic, ago } from './card.js';
 
-const { OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_USER, PUSH_TOKEN, PORT = 3000, MOCK, LASTFM_USER, LASTFM_KEY } = process.env;
+const { OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_USER, PUSH_TOKEN, PORT = 3000, MOCK, LASTFM_USER, LASTFM_KEY, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN } = process.env;
 const TAGLINE = process.env.TAGLINE || 'osu!mania 4K player from Norway';
 const LIVE_TTL = 20_000; // helper pushes every few seconds; older than this = game closed
 
@@ -68,12 +68,41 @@ async function getAvatar(id) {
   });
 }
 
+const sp = { v: null, exp: 0, last: null };
+async function getSpotify() {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET || !SPOTIFY_REFRESH_TOKEN) return null;
+  return memo('spotify', 12_000, async () => {
+    if (Date.now() > sp.exp) {
+      const r = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: { authorization: 'Basic ' + Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'), 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: SPOTIFY_REFRESH_TOKEN }),
+      });
+      if (!r.ok) throw new Error(`spotify token ${r.status}`);
+      const j = await r.json();
+      sp.v = j.access_token; sp.exp = Date.now() + (j.expires_in - 60) * 1000;
+    }
+    const r = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers: { authorization: `Bearer ${sp.v}` } });
+    if (r.status !== 204) {
+      if (!r.ok) throw new Error(`spotify ${r.status}`);
+      const j = await r.json();
+      if (j.is_playing && j.item?.name) {
+        sp.last = { title: j.item.name, artist: (j.item.artists || []).map((a) => a.name).join(', '), at: Date.now() };
+        return { playing: true, title: sp.last.title, artist: sp.last.artist };
+      }
+    }
+    return sp.last ? { playing: false, title: sp.last.title, artist: sp.last.artist, when: ago(new Date(sp.last.at).toISOString()) } : {};
+  });
+}
+
 async function getMusic() {
   if (music) {
     const fresh = Date.now() - music.at < 25_000;
     if (fresh) return music.data;
     if (!LASTFM_USER) return { ...music.data, playing: false, when: ago(new Date(music.at).toISOString()) };
   }
+  const spot = await getSpotify();
+  if (spot) return spot;
   if (MOCK) return { playing: true, title: 'Midnight Static', artist: 'Fictional Artist' };
   if (!LASTFM_USER || !LASTFM_KEY) return {};
   return memo('music', 20_000, async () => {
