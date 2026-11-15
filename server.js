@@ -85,6 +85,41 @@ async function buildState() {
   return { mode: d.playing ? 'playing' : 'menu', user, map: d, live: d, cover: await getCover(d.setId) };
 }
 
+const pngs = new Map(), inflight = new Map();
+const IMAGES = {
+  '/card.png': { ttl: 8_000, maxAge: 10, build: async () => renderCard(await buildState()) },
+  '/header.png': {
+    ttl: 300_000, maxAge: 300,
+    build: async () => {
+      const user = (await getUser()) || {};
+      return renderHeader({ user, avatar: await getAvatar(user.avatar || (user.id ? `https://a.ppy.sh/${user.id}` : null)), tagline: TAGLINE });
+    },
+  },
+  '/music.png': {
+    ttl: 8_000, maxAge: 10,
+    build: async () => {
+      const m = (await getMusic()) || {};
+      const cover = m.img ? await getImage(m.img) : null;
+      const progress = m.playing && m.duration ? Math.min(m.duration, m.progress + (Date.now() - m.fetchedAt)) : 0;
+      return renderMusic({ ...m, cover, progress });
+    },
+  },
+};
+const refreshPng = (name) => {
+  if (!inflight.has(name)) inflight.set(name, IMAGES[name].build().then((png) => { pngs.set(name, { at: Date.now(), png }); return png; }).finally(() => inflight.delete(name)));
+  return inflight.get(name);
+};
+// Serve the last picture instantly; if it is older than its ttl, refresh in the background.
+async function servePng(res, name, { ttl, maxAge }) {
+  const e = pngs.get(name);
+  let png;
+  if (e) {
+    png = e.png;
+    if (Date.now() - e.at > ttl) refreshPng(name).catch((err) => console.error(name, err.message));
+  } else png = await refreshPng(name);
+  res.writeHead(200, { 'content-type': 'image/png', 'cache-control': `public, max-age=${maxAge}` }).end(png);
+}
+
 http
   .createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -126,22 +161,8 @@ http
         sp.refresh = j.refresh_token; sp.exp = 0; cache.delete('spotify');
         return res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' }).end(`<body style="font-family:sans-serif;max-width:640px;margin:40px auto"><h2>Spotify connected</h2><p>Your music strip works now. To keep it after Render restarts, add this in Render under Environment as <b>SPOTIFY_REFRESH_TOKEN</b> (keep it private):</p><textarea readonly rows="4" style="width:100%" onclick="this.select()">${j.refresh_token}</textarea></body>`);
       }
-      if (url.pathname === '/card.png') {
-        const png = await renderCard(await buildState());
-        return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=10' }).end(png);
-      }
-      if (url.pathname === '/header.png') {
-        const user = (await getUser()) || {};
-        const png = await renderHeader({ user, avatar: await getAvatar(user.avatar || (user.id ? `https://a.ppy.sh/${user.id}` : null)), tagline: TAGLINE });
-        return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=300' }).end(png);
-      }
-      if (url.pathname === '/music.png') {
-        const m = (await getMusic()) || {};
-        const cover = m.img ? await getImage(m.img) : null;
-        const progress = m.playing && m.duration ? Math.min(m.duration, m.progress + (Date.now() - m.fetchedAt)) : 0;
-        const png = await renderMusic({ ...m, cover, progress });
-        return res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=10' }).end(png);
-      }
+      const img = IMAGES[url.pathname];
+      if (img) return servePng(res, url.pathname, img);
       res.writeHead(200, { 'content-type': 'text/plain' }).end('osu nowplaying: /card.png');
     } catch (e) {
       console.error(e);
@@ -149,3 +170,8 @@ http
     }
   })
   .listen(PORT, () => console.log(`listening on ${PORT}`));
+
+// Keep pictures warm so the first request after a quiet period is instant too.
+const warm = () => { for (const [name, { ttl }] of Object.entries(IMAGES)) { const e = pngs.get(name); if (!e || Date.now() - e.at > ttl) refreshPng(name).catch((err) => console.error(name, err.message)); } };
+warm();
+setInterval(warm, 5_000);
